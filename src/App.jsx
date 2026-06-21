@@ -564,7 +564,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
         <div className="flex items-center justify-between border-b border-neutral-200 bg-white px-6 py-4">
           <div>
             <h2 className="text-lg font-semibold text-neutral-900">{editing ? "Modifica pratica" : seed ? "Duplica pratica" : "Nuova pratica"}</h2>
-            <p className="text-xs text-neutral-500">{editing ? editing.id : "Modulo data-entry"}</p>
+            {editing ? <p className="text-xs text-neutral-500">{editing.id}</p> : null}
           </div>
           <button onClick={onClose} className="rounded-md p-1.5 text-neutral-400 hover:bg-neutral-100"><X className="h-5 w-5" /></button>
         </div>
@@ -591,7 +591,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <ComboField label="Città" value={f.citta} onChange={setCitta} suggestions={ALL_CITIES} placeholder="Es. Milano…" id="fc" />
-                <ComboField label="Zona" value={f.zona} onChange={set("zona")} suggestions={zoneSuggestions} placeholder="Es. Navigli…" id="fz" hint={zoneSuggestions.length ? `${zoneSuggestions.length} suggerimenti` : "libera"} />
+                <ComboField label="Zona" value={f.zona} onChange={set("zona")} suggestions={zoneSuggestions} placeholder="Es. Navigli…" id="fz" />
               </div>
               {discMatch && (
                 <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
@@ -613,8 +613,8 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
               <UrlField label="Link ONBILD" hint="valutazione originaria" placeholder="https://onbild.com/…" value={f.linkOnbild} onChange={set("linkOnbild")} error={showErr("linkOnbild")} ref={(el) => { if (el) errorRefs.current.linkOnbild = el; }} />
               <UrlField label="Cartella documentazione" hint="Drive / Dropbox" placeholder="https://drive.google.com/…" value={f.linkDrive} onChange={set("linkDrive")} error={showErr("linkDrive")} ref={(el) => { if (el) errorRefs.current.linkDrive = el; }} />
               <div className="border-t border-neutral-100 pt-4">
-                <Label hint="vitale per il commerciale">Contatto immobiliare</Label>
-                <input type="text" inputMode="tel" value={f.contattoImmobiliare} onChange={(e) => setF((s) => ({ ...s, contattoImmobiliare: formatPhone(e.target.value) }))} placeholder="Es. Mario Rossi · 333 123 4567" className={inputCls(false)} />
+                <Label>Contatto immobiliare</Label>
+                <input type="text" inputMode="tel" value={f.contattoImmobiliare} onChange={(e) => setF((s) => ({ ...s, contattoImmobiliare: formatPhone(e.target.value) }))} placeholder="Alan Zoccolan" className={inputCls(false)} />
               </div>
             </div>
           </CollapsibleFieldset>
@@ -678,7 +678,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
             <div className="space-y-4">
               <TextField label="Vincoli" placeholder="Es. vincolo paesaggistico…" value={f.vincoli} onChange={set("vincoli")} />
               <TextField label="Ipoteche / Gravami" placeholder="Es. ipoteca € 1,2M…" value={f.ipoteche} onChange={set("ipoteche")} />
-              <TextareaField label="Note analista" rows={3} placeholder="Note libere…" value={f.noteCondoni} onChange={set("noteCondoni")} />
+              <TextareaField label="Note analista" rows={3} value={f.noteCondoni} onChange={set("noteCondoni")} />
             </div>
           </CollapsibleFieldset>
         </div>
@@ -817,7 +817,7 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
                 ))}
               </div>
             ) : (
-              <p className="mt-3 text-xs text-neutral-400 italic">Nessuna nota ancora — inizia il log commerciale.</p>
+              null
             )}
           </div>
         </div>
