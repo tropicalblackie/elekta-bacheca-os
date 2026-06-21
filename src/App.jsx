@@ -5,7 +5,7 @@ import {
   Gavel, Pencil, Trash2, Inbox, Check, Calendar, MessageSquare, Download,
   ChevronUp, ChevronDown, ChevronsUpDown, Copy, TrendingUp, TrendingDown,
   Compass, Lock, ArrowDownRight, ArrowUpRight, Flag, UserPlus,
-  Phone, History, Briefcase, Archive, Send, Bell,
+  Phone, History, Briefcase, Archive, Send, Bell, MapPin,
 } from "lucide-react";
 
 /* ============================================================
@@ -153,12 +153,13 @@ const DEAL_EMPTY = {
   roiOnbild: "", roiPostDiscovery: "",
   cifraProposta: "", dataProposta: "",
   prezzoTotaleAnnuncio: "",
+  baseAsta: "", offertaMinimaAsta: "", dataEsperimento: "",
   prezzoMqDiscovery: "",
   tipologia: TIPOLOGIE[0],
   vincoli: "", ipoteche: "", noteCondoni: "",
   noteLog: [],
 };
-const DEAL_NUM = ["mq", "roiOnbild", "roiPostDiscovery", "cifraProposta", "prezzoTotaleAnnuncio", "prezzoMqDiscovery"];
+const DEAL_NUM = ["mq", "roiOnbild", "roiPostDiscovery", "cifraProposta", "prezzoTotaleAnnuncio", "prezzoMqDiscovery", "baseAsta", "offertaMinimaAsta"];
 
 /* ============================================================ */
 /*  STORE — DISCOVERY                                           */
@@ -323,8 +324,14 @@ function SortableTh({ label, sortKey, sort, onSort, align = "left" }) {
 }
 
 /* ---------- CALCOLATORI FINANZIARI ---------- */
-function ScontoOffertagBadge({ cifraProposta, prezzoTotaleAnnuncio }) {
-  const proposta = toNum(cifraProposta), totale = toNum(prezzoTotaleAnnuncio);
+function getOfferForDeal(deal, override) {
+  if (deal?.tipologia === "NPL / Asta") return toNum(deal?.offertaMinimaAsta);
+  return toNum(override ?? deal?.cifraProposta);
+}
+
+function ScontoOffertagBadge({ deal, cifraProposta, prezzoTotaleAnnuncio }) {
+  const proposta = deal ? getOfferForDeal(deal, cifraProposta) : toNum(cifraProposta);
+  const totale = toNum(prezzoTotaleAnnuncio);
   if (!proposta || !totale) return null;
   const sconto = ((proposta - totale) / totale) * 100;
   const isSconto = sconto < 0;
@@ -340,7 +347,7 @@ function MargineLordoBadge({ deal, cifraProposta: cfPropOverride }) {
   const mq       = toNum(deal.mq);
   const disc      = toNum(deal.prezzoMqDiscovery);
   const annuncio  = toNum(deal.prezzoTotaleAnnuncio);
-  const proposta  = toNum(cfPropOverride ?? deal.cifraProposta);
+  const proposta  = getOfferForDeal(deal, cfPropOverride);
   if (!proposta) return null;
   const valoreUscita = disc > 0 && mq > 0 ? disc * mq : annuncio > 0 ? annuncio : 0;
   if (!valoreUscita) return null;
@@ -357,7 +364,7 @@ function MargineLordoBadge({ deal, cifraProposta: cfPropOverride }) {
 /* ============================================================ */
 /*  DEAL FORM SLIDE-OVER                                        */
 /* ============================================================ */
-function DealSlideOver({ open, onClose, onSave, editing, seed, zones }) {
+function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDeals = [] }) {
   const [f, setF] = useState(DEAL_EMPTY);
   const [touched, setTouched] = useState(false);
   const firstRef  = useRef(null);
@@ -394,6 +401,19 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones }) {
 
   const mqNum  = toNum(f.mq), totNum = toNum(f.prezzoTotaleAnnuncio);
   const prezzoMqCalcolato = mqNum > 0 && totNum > 0 ? Math.round(totNum / mqNum) : 0;
+  const isNpl = f.tipologia === "NPL / Asta";
+
+  const collisionDeal = useMemo(() => {
+    const addr = (f.indirizzo || "").trim().toLowerCase();
+    if (addr.length < 5) return null;
+    return existingDeals.find((d) => {
+      if (d.stato === "Abort") return false;
+      if (editing?.id && d.id === editing.id) return false;
+      const other = (d.indirizzo || "").trim().toLowerCase();
+      if (other.length < 5) return false;
+      return other.includes(addr) || addr.includes(other);
+    }) || null;
+  }, [existingDeals, f.indirizzo, editing]);
 
   const errors = useMemo(() => {
     const e = {};
@@ -452,7 +472,15 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones }) {
           <CollapsibleFieldset legend="Immobile & geolocalizzazione">
             <div className="space-y-4">
               <TextField ref={(el) => { firstRef.current = el; if (el) errorRefs.current.progetto = el; }} cap label="Nome progetto" placeholder="Es. Via Comisso 4" value={f.progetto} onChange={set("progetto")} error={showErr("progetto")} />
-              <TextField cap label="Indirizzo completo" placeholder="Via, civico, CAP, città" value={f.indirizzo} onChange={set("indirizzo")} />
+              <div>
+                <TextField cap label="Indirizzo completo" placeholder="Via, civico, CAP, città" value={f.indirizzo} onChange={set("indirizzo")} />
+                {collisionDeal && (
+                  <div className="mt-2 flex items-center gap-1.5 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>⚠️ Attenzione: Esiste già una pratica in questa via [{collisionDeal.id}]</span>
+                  </div>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <ComboField label="Città" value={f.citta} onChange={setCitta} suggestions={ALL_CITIES} placeholder="Es. Milano…" id="fc" />
                 <ComboField label="Zona" value={f.zona} onChange={set("zona")} suggestions={zoneSuggestions} placeholder="Es. Navigli…" id="fz" hint={zoneSuggestions.length ? `${zoneSuggestions.length} suggerimenti` : "libera"} />
@@ -515,7 +543,11 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones }) {
                 <NumField label="ROI post-discovery" suffix="%" placeholder="—" value={f.roiPostDiscovery} onChange={set("roiPostDiscovery")} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <NumFieldFormatted label="Prezzo totale annuncio" hint="da Immobiliare.it" suffix="€" placeholder="0" value={f.prezzoTotaleAnnuncio} onChange={(e) => setF((s) => ({ ...s, prezzoTotaleAnnuncio: e.target.value }))} />
+                {!isNpl ? (
+                  <NumFieldFormatted label="Prezzo totale annuncio" hint="da Immobiliare.it" suffix="€" placeholder="0" value={f.prezzoTotaleAnnuncio} onChange={(e) => setF((s) => ({ ...s, prezzoTotaleAnnuncio: e.target.value }))} />
+                ) : (
+                  <NumFieldFormatted label="Base d'Asta" suffix="€" placeholder="0" value={f.baseAsta} onChange={(e) => setF((s) => ({ ...s, baseAsta: e.target.value }))} />
+                )}
                 <div>
                   <Label hint="calcolato auto">Prezzo MQ annuncio</Label>
                   <div className="flex h-[38px] items-center rounded-md border border-neutral-200 bg-neutral-50 px-3 text-right text-sm tabular-nums text-neutral-600">
@@ -523,6 +555,12 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones }) {
                   </div>
                 </div>
               </div>
+              {isNpl && (
+                <div className="grid grid-cols-2 gap-4">
+                  <NumFieldFormatted label="Offerta Minima" suffix="€" placeholder="0" value={f.offertaMinimaAsta} onChange={(e) => setF((s) => ({ ...s, offertaMinimaAsta: e.target.value }))} />
+                  <DateField label="Data Esperimento" value={f.dataEsperimento} onChange={set("dataEsperimento")} />
+                </div>
+              )}
               <div>
                 <NumField label="Prezzo MQ emerso da Discovery" suffix="€/mq" placeholder="—" value={f.prezzoMqDiscovery} onChange={set("prezzoMqDiscovery")} hint={discMatch ? "pre-compilato da Discovery" : undefined} />
               </div>
@@ -621,9 +659,9 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
               <NumField label="Cifra proposta" suffix="€" placeholder="0" value={f.cifraProposta} onChange={set("cifraProposta")} />
               <DateField label="Data proposta" value={f.dataProposta} onChange={set("dataProposta")} />
             </div>
-            {f.cifraProposta && (deal.prezzoTotaleAnnuncio > 0 || deal.prezzoMqDiscovery > 0) && (
+            {getOfferForDeal(deal, f.cifraProposta) > 0 && (deal.prezzoTotaleAnnuncio > 0 || deal.prezzoMqDiscovery > 0) && (
               <div className="flex flex-wrap items-center gap-2 rounded-md border border-neutral-100 bg-neutral-50 px-3 py-2">
-                <ScontoOffertagBadge cifraProposta={f.cifraProposta} prezzoTotaleAnnuncio={deal.prezzoTotaleAnnuncio} />
+                <ScontoOffertagBadge deal={deal} cifraProposta={f.cifraProposta} prezzoTotaleAnnuncio={deal.prezzoTotaleAnnuncio} />
                 <MargineLordoBadge deal={deal} cifraProposta={f.cifraProposta} />
               </div>
             )}
@@ -788,6 +826,15 @@ function DealDetailModal({ deal, onClose, onEdit, onDuplicate, onDelete, onGesti
             <h2 className="mt-1 text-xl font-semibold text-neutral-900">{deal.progetto}</h2>
             <div className="flex items-center gap-1.5">
               <p className="text-sm text-neutral-500">{deal.indirizzo || "—"} · {deal.citta} · {deal.zona}</p>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([deal.indirizzo, deal.citta].filter(Boolean).join(", "))}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Apri su Google Maps"
+                className="rounded p-0.5 text-neutral-300 transition hover:text-neutral-600"
+              >
+                <MapPin className="h-3.5 w-3.5" />
+              </a>
               <button onClick={copyAddr} title="Copia indirizzo" className={`rounded p-0.5 transition ${copiedAddr ? "text-emerald-600" : "text-neutral-300 hover:text-neutral-500"}`}>{copiedAddr ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}</button>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-neutral-400">
@@ -824,17 +871,17 @@ function DealDetailModal({ deal, onClose, onEdit, onDuplicate, onDelete, onGesti
           <WidgetPrezzoMq deal={deal} />
           <WidgetRoi deal={deal} />
 
-          {toNum(deal.cifraProposta) > 0 && (
+          {getOfferForDeal(deal) > 0 && (
             <div className="rounded-lg border border-neutral-200 bg-white p-4">
               <div className="grid grid-cols-2 divide-x divide-neutral-100">
                 <div className="pr-4">
-                  <div className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Cifra proposta</div>
-                  <div className="mt-1 text-lg font-semibold tabular-nums">{eur(deal.cifraProposta)}</div>
-                  <div className="mt-1 text-[11px] text-neutral-400">{deal.dataProposta || "—"}</div>
+                  <div className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">{deal.tipologia === "NPL / Asta" ? "Offerta minima" : "Cifra proposta"}</div>
+                  <div className="mt-1 text-lg font-semibold tabular-nums">{eur(getOfferForDeal(deal))}</div>
+                  <div className="mt-1 text-[11px] text-neutral-400">{deal.tipologia === "NPL / Asta" ? (deal.dataEsperimento || "—") : (deal.dataProposta || "—")}</div>
                 </div>
                 <div className="pl-4 flex flex-col justify-center gap-2">
                   <div className="text-[11px] font-medium uppercase tracking-wider text-neutral-400">Analisi offerta</div>
-                  <ScontoOffertagBadge cifraProposta={deal.cifraProposta} prezzoTotaleAnnuncio={deal.prezzoTotaleAnnuncio} />
+                  <ScontoOffertagBadge deal={deal} cifraProposta={deal.cifraProposta} prezzoTotaleAnnuncio={deal.prezzoTotaleAnnuncio} />
                   <MargineLordoBadge deal={deal} />
                 </div>
               </div>
@@ -1014,6 +1061,7 @@ function ArchivioScartiModal({ deals, open, onClose, onRestore }) {
 /* ============================================================ */
 function AgendaCommerciale({ deals }) {
   const [soloMiei, setSoloMiei] = useState(false);
+  const [reportCopied, setReportCopied] = useState(false);
   const pipeline = deals.filter((d) => d.stato !== "Abort");
   const filtered = soloMiei ? pipeline.filter((d) => d.owner?.toLowerCase().includes("corrente") || `${d.nomeInseritore} ${d.cognomeInseritore}`.toLowerCase().includes("corrente")) : pipeline;
 
@@ -1023,6 +1071,31 @@ function AgendaCommerciale({ deals }) {
     return d.stato === "Stand-by" && gg > 7;
   }).sort((a, b) => giorniTrascorsiISO(a.ultimaModifica || "") - giorniTrascorsiISO(b.ultimaModifica || ""));
   const attivate = filtered.filter((d) => d.stato === "Attivata").slice(0, 10);
+
+  const generaReportSettimanale = async () => {
+    const nuoviDealAnalizzati = deals.filter((d) => d.stato === "Stand-by").length;
+    const trattativa = deals.filter((d) => d.stato === "Attivata" && ["Proposta inviata", "Due Diligence"].includes(d.subStato));
+    const potenziale = trattativa.reduce((sum, d) => sum + getOfferForDeal(d), 0);
+    const scarti = deals.filter((d) => d.stato === "Abort").length;
+    const urgenti = deals
+      .filter((d) => d.stato !== "Abort" && (["Proposta inviata", "Due Diligence"].includes(d.subStato) || d.subStato === "Da valutare"))
+      .sort((a, b) => PRIORITA.indexOf(a.priorita) - PRIORITA.indexOf(b.priorita))
+      .slice(0, 3)
+      .map((d) => `${d.progetto} (${d.id})`)
+      .join("; ");
+
+    const testo = [
+      "📊 Recap Settimanale Elekta:",
+      `- Nuovi Deal Analizzati: ${nuoviDealAnalizzati}`,
+      `- Proposte in Corso: ${trattativa.length} per un potenziale di ${eur(potenziale)}`,
+      `- Deal Scartati: ${scarti}`,
+      `🔥 Top 3 Pratiche Urgenti: ${urgenti || "Nessuna"}`,
+    ].join("\n");
+
+    await navigator.clipboard.writeText(testo);
+    setReportCopied(true);
+    setTimeout(() => setReportCopied(false), 2000);
+  };
 
   const AgendaCard = ({ deal }) => (
     <div className="flex items-center gap-4 rounded-lg border border-neutral-200 bg-white px-4 py-3 hover:border-neutral-300 hover:shadow-sm transition">
@@ -1045,8 +1118,12 @@ function AgendaCommerciale({ deals }) {
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h1 className="text-lg font-semibold text-neutral-900">Agenda Commerciale</h1><p className="text-xs text-neutral-500">Cruscotto operativo per l'agente · aggiornamento in tempo reale</p></div>
-        <button onClick={() => setSoloMiei((v) => !v)} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${soloMiei ? "bg-neutral-900 text-white ring-neutral-900" : "bg-white text-neutral-600 ring-neutral-300 hover:bg-neutral-50"}`}><User className="h-3 w-3" />Solo i miei deal</button>
+        <div className="flex items-center gap-2">
+          <button onClick={generaReportSettimanale} className="inline-flex items-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"><Download className="h-3.5 w-3.5" />Genera Report Settimanale</button>
+          <button onClick={() => setSoloMiei((v) => !v)} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ring-1 ring-inset transition ${soloMiei ? "bg-neutral-900 text-white ring-neutral-900" : "bg-white text-neutral-600 ring-neutral-300 hover:bg-neutral-50"}`}><User className="h-3 w-3" />Solo i miei deal</button>
+        </div>
       </div>
+      {reportCopied && <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-700">Report settimanale copiato negli appunti.</div>}
       <section>
         <div className="mb-3 flex items-center gap-2.5"><span className="flex h-5 w-5 items-center justify-center rounded bg-neutral-900 text-[11px] font-semibold text-white">1</span><h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-700">Proposte in attesa di risposta</h2><span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600 tabular-nums ring-1 ring-neutral-200">{proposte.length}</span></div>
         <div className="space-y-2">{proposte.length ? proposte.map((d) => <AgendaCard key={d.id} deal={d} />) : <EmptySection label="Nessuna proposta in attesa — ottimo segno." />}</div>
@@ -1083,7 +1160,7 @@ function AgendaCommerciale({ deals }) {
 /* ============================================================ */
 const SORT_GET = { roi: (d) => toNum(d.roiOnbild), mq: (d) => toNum(d.mq) };
 
-function BachecaDeals({ deals, dispatch, zones }) {
+function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpenHandled }) {
   const [view, setView]             = useState("grid");
   const [selId, setSelId]           = useState(null);
   const [formOpen, setFormOpen]     = useState(false);
@@ -1132,6 +1209,12 @@ function BachecaDeals({ deals, dispatch, zones }) {
 
   const isEmpty       = pipeline.length === 0;
   const STATI_PIPELINE = STATI.filter((s) => s !== "Abort");
+
+  useEffect(() => {
+    if (!commandOpenDealId) return;
+    setSelId(commandOpenDealId);
+    if (onCommandOpenHandled) onCommandOpenHandled();
+  }, [commandOpenDealId, onCommandOpenHandled]);
 
   return (
     <>
@@ -1244,11 +1327,57 @@ function BachecaDeals({ deals, dispatch, zones }) {
       )}
 
       <DealDetailModal deal={selected} onClose={() => setSelId(null)} onEdit={openEdit} onDuplicate={openDup} onDelete={del} onGestioneAgente={(d) => { setSelId(null); setGestioneAgente(d); }} />
-      <DealSlideOver open={formOpen} editing={editing} seed={seed} onClose={() => { setFormOpen(false); setEditing(null); setSeed(null); }} onSave={save} zones={zones} />
+      <DealSlideOver open={formOpen} editing={editing} seed={seed} onClose={() => { setFormOpen(false); setEditing(null); setSeed(null); }} onSave={save} zones={zones} existingDeals={deals.filter((d) => d.stato !== "Abort")} />
       <GestioneAgenteSlideOver open={!!gestioneAgente} deal={gestioneAgente} onClose={() => setGestioneAgente(null)} onSave={saveGA} onAddNote={addNote} />
       <AbortModal open={!!abortId} onConfirm={handleAbort} onCancel={() => setAbortId(null)} />
       <ArchivioScartiModal deals={deals} open={archivioOpen} onClose={() => setArchivioOpen(false)} onRestore={restoreDeal} />
     </>
+  );
+}
+
+function CommandPalette({ open, onClose, deals, onSelect }) {
+  const [q, setQ] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setQ("");
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [open]);
+
+  const results = useMemo(() => {
+    const sq = q.trim().toLowerCase();
+    if (!sq) return deals.slice(0, 10);
+    return deals
+      .filter((d) => `${d.id} ${d.indirizzo} ${d.citta}`.toLowerCase().includes(sq))
+      .slice(0, 20);
+  }, [deals, q]);
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center bg-neutral-900/40 p-4 pt-[12vh] backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-neutral-200 px-4 py-3">
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Cerca per ID, via o citta..."
+            className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900"
+          />
+        </div>
+        <div className="max-h-[50vh] overflow-y-auto p-2">
+          {results.length === 0 && <div className="px-3 py-6 text-center text-sm text-neutral-400">Nessun risultato.</div>}
+          {results.map((d) => (
+            <button key={d.id} onClick={() => onSelect(d.id)} className="w-full rounded-md px-3 py-2 text-left hover:bg-neutral-50">
+              <div className="text-xs text-neutral-400">{d.id} · {d.stato}</div>
+              <div className="text-sm font-semibold text-neutral-900">{d.progetto}</div>
+              <div className="text-xs text-neutral-500">{d.indirizzo || "—"} · {d.citta}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1427,6 +1556,8 @@ export default function ElektaBachecaOS() {
   const [dealState, dealDispatch] = useReducer(dealReducer, undefined, () => loadLS(LS_DEALS, DEAL_INIT));
   const [discState, discDispatch] = useReducer(discReducer, undefined, () => loadLS(LS_DISC,  DISC_INIT));
   const [tab, setTab]             = useState("bacheca");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [commandOpenDealId, setCommandOpenDealId] = useState(null);
 
   useEffect(() => { saveLS(LS_DEALS, dealState); }, [dealState]);
   useEffect(() => { saveLS(LS_DISC,  discState);  }, [discState]);
@@ -1436,6 +1567,17 @@ export default function ElektaBachecaOS() {
     const gg = d.ultimaModifica ? giorniTrascorsiISO(d.ultimaModifica) : giorniTrascorsi(d.dataCaricamento);
     return d.stato === "Stand-by" && gg > 7;
   }).length;
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 antialiased" style={{ fontFamily: "Inter, system-ui, -apple-system, sans-serif" }}>
@@ -1458,10 +1600,20 @@ export default function ElektaBachecaOS() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">
-        {tab === "bacheca"   && <BachecaDeals deals={dealState.deals} dispatch={dealDispatch} zones={discState.zones} />}
+        {tab === "bacheca"   && <BachecaDeals deals={dealState.deals} dispatch={dealDispatch} zones={discState.zones} commandOpenDealId={commandOpenDealId} onCommandOpenHandled={() => setCommandOpenDealId(null)} />}
         {tab === "discovery" && <DiscoveryMercato zones={discState.zones} dispatch={discDispatch} />}
         {tab === "agenda"    && <AgendaCommerciale deals={dealState.deals} />}
       </main>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        deals={dealState.deals}
+        onSelect={(id) => {
+          setPaletteOpen(false);
+          setTab("bacheca");
+          setCommandOpenDealId(id);
+        }}
+      />
     </div>
   );
 }
