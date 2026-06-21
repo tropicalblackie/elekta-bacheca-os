@@ -1327,7 +1327,7 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div><h1 className="text-lg font-semibold text-neutral-900">Bacheca Deals</h1><p className="text-xs text-neutral-500">Hub logistico commerciale · calcoli complessi su ONBILD</p></div>
+        <div><h1 className="text-lg font-semibold text-neutral-900">Bacheca</h1></div>
         <div className="flex flex-wrap items-center gap-2">
           {!isEmpty && (
             <>
@@ -1354,7 +1354,7 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
         <div className="flex min-h-[55vh] flex-col items-center justify-center text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-neutral-200 bg-white shadow-sm"><Inbox className="h-6 w-6 text-neutral-400" /></div>
           <h2 className="mt-5 text-lg font-semibold text-neutral-900">Bacheca vuota</h2>
-          <p className="mt-1 max-w-sm text-sm text-neutral-500">Inserisci il primo deal con i link essenziali.</p>
+          <p className="mt-1 max-w-sm text-sm text-neutral-500">Inserisci il primo deal</p>
           <button onClick={openNew} className="mt-5 inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800"><Plus className="h-4 w-4" />Nuova pratica</button>
         </div>
       ) : (
@@ -1691,7 +1691,7 @@ export default function ElektaBachecaOS() {
     <div className="min-h-screen bg-neutral-50 text-neutral-900 antialiased" style={{ fontFamily: "Inter, system-ui, -apple-system, sans-serif" }}>
       <header className="sticky top-0 z-30 border-b border-neutral-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-          <span className="text-lg font-semibold tracking-tight">Elekta <span className="text-neutral-400">Bacheca OS</span> <span className="ml-1 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-medium text-neutral-500 tabular-nums">v8</span></span>
+          <span className="text-lg font-semibold tracking-tight">Elekta <span className="text-neutral-400">Bacheca OS</span></span>
           <nav className="flex rounded-md border border-neutral-300 bg-neutral-50 p-0.5">
             <button onClick={() => setTab("bacheca")} className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition ${tab === "bacheca" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
               <LayoutGrid className="h-3.5 w-3.5" />Bacheca
