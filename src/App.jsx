@@ -471,7 +471,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
 
           <CollapsibleFieldset legend="Immobile & geolocalizzazione">
             <div className="space-y-4">
-              <TextField ref={(el) => { firstRef.current = el; if (el) errorRefs.current.progetto = el; }} cap label="Nome progetto" placeholder="Es. Via Comisso 4" value={f.progetto} onChange={set("progetto")} error={showErr("progetto")} />
+              <TextField ref={(el) => { firstRef.current = el; if (el) errorRefs.current.progetto = el; }} cap label="Riferimento" placeholder="Es. Via Comisso 4" value={f.progetto} onChange={set("progetto")} error={showErr("progetto")} />
               <div>
                 <TextField cap label="Indirizzo completo" placeholder="Via, civico, CAP, città" value={f.indirizzo} onChange={set("indirizzo")} />
                 {collisionDeal && (
