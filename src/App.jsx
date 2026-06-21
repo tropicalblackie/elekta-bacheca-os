@@ -17,7 +17,30 @@ const eurMq = (n) => `${new Intl.NumberFormat("it-IT", { maximumFractionDigits: 
 const pct = (n) => `${n > 0 ? "+" : ""}${(n || 0).toFixed(1)}%`;
 const oggi = () => new Date().toLocaleDateString("it-IT");
 const oggiISO = () => new Date().toISOString().slice(0, 10);
-const toNum = (v) => { const n = parseFloat(String(v).replace(/\./g, "").replace(",", ".")); return isNaN(n) ? 0 : n; };
+const toNum = (v) => {
+  const raw = String(v ?? "").trim().toLowerCase();
+  if (!raw) return 0;
+
+  let s = raw.replace(/\s+/g, "");
+  let mul = 1;
+  if (/(mln|milion[ei]?|m$)/.test(s)) mul = 1_000_000;
+  else if (/(k$|mila)/.test(s)) mul = 1_000;
+
+  s = s.replace(/€/g, "").replace(/eur/g, "").replace(/%/g, "");
+  s = s.replace(/(mln|milion[ei]?|m$|k$|mila)/g, "");
+
+  if (s.includes(",") && s.includes(".")) {
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (s.includes(",")) {
+    s = s.replace(",", ".");
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(s)) {
+    s = s.replace(/\./g, "");
+  }
+
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n * mul : 0;
+};
+const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 
 const eurK = (n) => {
   const v = toNum(n);
@@ -74,11 +97,84 @@ const formatPhone = (v) => {
   return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6, 13)}`;
 };
 
+function getDealPriority(deal) {
+  const giorni = deal?.ultimaModifica ? giorniTrascorsiISO(deal.ultimaModifica) : giorniTrascorsi(deal?.dataCaricamento);
+  const urgency = clamp(Math.round(giorni * 1.8), 0, 30);
+
+  const critical = ["progetto", "citta", "zona", "linkAnnuncio", "linkOnbild", "linkDrive", "contattoImmobiliare", "mq"];
+  const filled = critical.filter((k) => String(deal?.[k] ?? "").trim() && toNum(deal?.[k]) !== 0 || ["progetto", "citta", "zona", "linkAnnuncio", "linkOnbild", "linkDrive", "contattoImmobiliare"].includes(k) && String(deal?.[k] ?? "").trim()).length;
+  const readiness = Math.round((filled / critical.length) * 20);
+
+  const hasVincoli = Boolean(String(deal?.vincoli || "").trim());
+  const hasIpoteche = Boolean(String(deal?.ipoteche || "").trim()) && !String(deal?.ipoteche || "").toLowerCase().includes("libero");
+  const risk = clamp(15 - (hasVincoli ? 7 : 0) - (hasIpoteche ? 8 : 0), 0, 15);
+
+  const baseRoi = toNum(deal?.roiPostDiscovery) || toNum(deal?.roiOnbild);
+  let economics = clamp(Math.round(baseRoi * 2), 0, 18);
+  const richiesto = toNum(deal?.prezzoTotaleAnnuncio);
+  const offerta = getOfferForDeal(deal);
+  if (richiesto > 0 && offerta > 0) {
+    const scontoPct = ((richiesto - offerta) / richiesto) * 100;
+    economics += clamp(Math.round(scontoPct), 0, 7);
+  }
+  economics = clamp(economics, 0, 25);
+
+  const momentum = clamp((deal?.stato === "Attivata" ? 5 : 0) + ((deal?.noteLog || []).length > 0 ? 5 : 0), 0, 10);
+  const score = clamp(urgency + readiness + risk + economics + momentum, 0, 100);
+
+  const tier = score >= 80 ? "A" : score >= 60 ? "B" : score >= 40 ? "C" : "D";
+  return { score, tier, breakdown: { urgency, readiness, risk, economics, momentum } };
+}
+
+function PriorityScoreBadge({ deal, compact = false }) {
+  const { score, tier } = getDealPriority(deal);
+  const style = tier === "A"
+    ? "bg-red-50 text-red-700 ring-red-200"
+    : tier === "B"
+      ? "bg-amber-50 text-amber-700 ring-amber-200"
+      : tier === "C"
+        ? "bg-sky-50 text-sky-700 ring-sky-200"
+        : "bg-neutral-100 text-neutral-600 ring-neutral-300";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${style}`} title={`Priorita ${score}/100`}>
+      {compact ? "P" : "Priorita"} {score}
+    </span>
+  );
+}
+
+function RoiDeltaBadge({ deal }) {
+  const onb = toNum(deal?.roiOnbild);
+  const post = toNum(deal?.roiPostDiscovery);
+  if (!onb || !post) return null;
+  const delta = post - onb;
+  const up = delta >= 0;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${up ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-red-50 text-red-700 ring-red-200"}`}>
+      Δ ROI {pct(delta)}
+    </span>
+  );
+}
+
+function CompactTimeline({ items }) {
+  if (!items?.length) return null;
+  return (
+    <div className="space-y-1.5 rounded-lg border border-neutral-200 p-3">
+      {items.map((nota, i) => (
+        <div key={i} className="grid grid-cols-[84px_1fr] items-start gap-2 text-xs">
+          <span className="rounded bg-neutral-100 px-2 py-0.5 tabular-nums text-neutral-500">{nota.data}</span>
+          <span className="text-neutral-700">{nota.testo}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ============================================================ */
 /*  FEATURE 1: LOCALSTORAGE PERSISTENCE                         */
 /* ============================================================ */
 const LS_DEALS = "elekta_v8_deals";
 const LS_DISC  = "elekta_v8_disc";
+const LS_BACHECA_UI = "elekta_v9_bacheca_ui";
 
 function loadLS(key, fallback) {
   try {
@@ -375,13 +471,19 @@ function NumField({ label, hint, error, suffix, ...p }) {
 function NumFieldFormatted({ label, hint, error, suffix, value, onChange, placeholder }) {
   const [display, setDisplay] = useState("");
   useEffect(() => {
-    const num = String(value || "").replace(/\./g, "").replace(/[^0-9]/g, "");
-    setDisplay(num ? new Intl.NumberFormat("it-IT").format(Number(num)) : "");
+    const num = toNum(value);
+    setDisplay(num ? new Intl.NumberFormat("it-IT").format(Math.round(num)) : "");
   }, [value]);
   const handleChange = (e) => {
-    const raw = e.target.value.replace(/\./g, "").replace(/[^0-9]/g, "");
-    setDisplay(raw ? new Intl.NumberFormat("it-IT").format(Number(raw)) : "");
-    onChange({ target: { value: raw } });
+    const raw = e.target.value;
+    if (!raw.trim()) {
+      setDisplay("");
+      onChange({ target: { value: "" } });
+      return;
+    }
+    const parsed = toNum(raw);
+    setDisplay(parsed ? new Intl.NumberFormat("it-IT").format(Math.round(parsed)) : "");
+    onChange({ target: { value: parsed ? String(Math.round(parsed)) : "" } });
   };
   return (
     <div>
@@ -697,7 +799,12 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
 /* ============================================================ */
 /*  GESTIONE AGENTE SLIDE-OVER                                  */
 /* ============================================================ */
-const NOTE_TAGS = ["[Chiamata]", "[Sopralluogo]", "[Rilancio]"];
+const NOTE_TEMPLATES = [
+  { label: "Chiamata", text: "[Chiamata] Cliente contattato, in attesa feedback." },
+  { label: "Sopralluogo", text: "[Sopralluogo] Sopralluogo pianificato con agenzia." },
+  { label: "Doc mancanti", text: "[Documenti] Mancano documenti chiave per procedere." },
+  { label: "Follow-up", text: "[Follow-up] Ricontatto pianificato entro 48h." },
+];
 
 function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
   const [f, setF] = useState({});
@@ -722,10 +829,10 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
     setNuovaNota("");
   };
 
-  const prependTag = (tag) => {
+  const applyTemplate = (text) => {
     setNuovaNota((prev) => {
-      const next = prev.startsWith(tag) ? prev : `${tag} ${prev}`;
-      return next;
+      if (!prev.trim()) return text;
+      return `${prev} ${text}`;
     });
     notaInputRef.current?.focus();
   };
@@ -788,10 +895,10 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
           <div>
             <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-neutral-500"><MessageSquare className="h-3.5 w-3.5" />Note commerciali · {noteLog.length}</div>
             <div className="mb-2 flex gap-1.5">
-              {NOTE_TAGS.map((tag) => (
-                <button key={tag} type="button" onClick={() => prependTag(tag)}
+              {NOTE_TEMPLATES.map((tpl) => (
+                <button key={tpl.label} type="button" onClick={() => applyTemplate(tpl.text)}
                   className="rounded-full border border-neutral-300 bg-neutral-50 px-2.5 py-0.5 text-[11px] font-medium text-neutral-600 hover:bg-neutral-100 transition">
-                  {tag}
+                  {tpl.label}
                 </button>
               ))}
             </div>
@@ -807,18 +914,7 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
               />
               <button onClick={aggiungiNota} disabled={!nuovaNota.trim()} className="inline-flex items-center gap-1 rounded-md bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-40"><Send className="h-3.5 w-3.5" /></button>
             </div>
-            {noteLog.length > 0 ? (
-              <div className="mt-3 space-y-2">
-                {noteLog.map((nota, i) => (
-                  <div key={i} className="relative border-l-2 border-neutral-200 pl-3">
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-neutral-400 tabular-nums">{nota.data}</div>
-                    <p className="mt-0.5 text-sm text-neutral-800">{nota.testo}</p>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              null
-            )}
+            {noteLog.length > 0 ? <div className="mt-3"><CompactTimeline items={noteLog} /></div> : null}
           </div>
         </div>
         <div className="flex shrink-0 items-center justify-end gap-2 border-t border-neutral-200 px-6 py-3.5">
@@ -877,6 +973,7 @@ function WidgetRoi({ deal }) {
         <div className={`rounded-md border px-3 py-2 text-center ${contrazione ? "border-red-200 bg-red-50" : "border-neutral-200 bg-neutral-50"}`}><div className="text-[10px] uppercase tracking-wide text-neutral-400">ROI Post-Discovery</div><div className="mt-1">{hasPost ? <RoiTag roi={post} size="lg" /> : <span className="text-lg text-neutral-300">—</span>}</div></div>
       </div>
       {contrazione && <div className="mt-3 flex items-center gap-1.5 rounded-md bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" />Margine in contrazione ({pct(post - onb)} vs stima ONBILD)</div>}
+      {hasPost && <div className="mt-3"><RoiDeltaBadge deal={deal} /></div>}
     </div>
   );
 }
@@ -929,6 +1026,7 @@ function DealDetailModal({ deal, onClose, onEdit, onDuplicate, onDelete, onGesti
               <StatoChip stato={deal.stato} />
               {deal.subStato && <span className="text-xs text-neutral-400">· {deal.subStato}</span>}
               <PrioritaChip p={deal.priorita} />
+              <PriorityScoreBadge deal={deal} />
             </div>
             <h2 className="mt-1 text-xl font-semibold text-neutral-900">{deal.progetto}</h2>
             <div className="flex items-center gap-1.5">
@@ -1011,15 +1109,8 @@ function DealDetailModal({ deal, onClose, onEdit, onDuplicate, onDelete, onGesti
 
           {(deal.noteLog || []).length > 0 && (
             <section>
-              <SectionTitle n={2}>Log commerciale</SectionTitle>
-              <div className="space-y-2 rounded-lg border border-neutral-200 px-4 py-3">
-                {(deal.noteLog || []).map((nota, i) => (
-                  <div key={i} className="relative border-l-2 border-neutral-200 pl-3">
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-neutral-400">{nota.data}</div>
-                    <p className="mt-0.5 text-sm text-neutral-700">{nota.testo}</p>
-                  </div>
-                ))}
-              </div>
+              <SectionTitle n={2}>Timeline attivita</SectionTitle>
+              <CompactTimeline items={deal.noteLog || []} />
             </section>
           )}
         </div>
@@ -1068,7 +1159,7 @@ function KanbanCard({ deal, onOpen, dispatch, onAbort }) {
       <button onClick={onOpen} className="w-full text-left focus:outline-none">
         <div className="flex items-center justify-between">
           <span className="flex items-center gap-1.5 font-mono text-[11px] text-neutral-400">{deal.id}{isNew && <NewBadge />}</span>
-          <div className="flex items-center gap-2"><PrioritaChip p={deal.priorita} />{roiOnb > 0 && <RoiTag roi={roiOnb} />}</div>
+          <div className="flex items-center gap-2"><PrioritaChip p={deal.priorita} />{roiOnb > 0 && <RoiTag roi={roiOnb} />}<PriorityScoreBadge deal={deal} compact /></div>
         </div>
         <div className="mt-1 truncate text-sm font-semibold text-neutral-900">{deal.progetto}</div>
         {deal.subStato && <div className="mt-0.5 truncate text-[11px] text-neutral-400">{deal.subStato}</div>}
@@ -1265,20 +1356,21 @@ function AgendaCommerciale({ deals }) {
 /* ============================================================ */
 /*  BACHECA DEALS                                               */
 /* ============================================================ */
-const SORT_GET = { roi: (d) => toNum(d.roiOnbild), mq: (d) => toNum(d.mq) };
+const SORT_GET = { roi: (d) => toNum(d.roiOnbild), mq: (d) => toNum(d.mq), priority: (d) => getDealPriority(d).score };
 
-function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpenHandled }) {
-  const [view, setView]             = useState("grid");
+function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, commandCreateDealTick, onCommandOpenHandled }) {
+  const uiInit = loadLS(LS_BACHECA_UI, { view: "grid", q: "", soloMiei: false, sort: { key: "priority", dir: "desc" } });
+  const [view, setView]             = useState(uiInit.view || "grid");
   const [selId, setSelId]           = useState(null);
   const [formOpen, setFormOpen]     = useState(false);
   const [editing, setEditing]       = useState(null);
   const [seed, setSeed]             = useState(null);
-  const [q, setQ]                   = useState("");
-  const [sort, setSort]             = useState({ key: null, dir: "asc" });
+  const [q, setQ]                   = useState(uiInit.q || "");
+  const [sort, setSort]             = useState(uiInit.sort || { key: "priority", dir: "desc" });
   const [gestioneAgente, setGestioneAgente] = useState(null);
   const [abortId, setAbortId]       = useState(null);
   const [archivioOpen, setArchivioOpen] = useState(false);
-  const [soloMiei, setSoloMiei]     = useState(false);
+  const [soloMiei, setSoloMiei]     = useState(Boolean(uiInit.soloMiei));
 
   const selected = deals.find((d) => d.id === selId) || null;
   const pipeline = deals.filter((d) => d.stato !== "Abort");
@@ -1322,6 +1414,16 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
     setSelId(commandOpenDealId);
     if (onCommandOpenHandled) onCommandOpenHandled();
   }, [commandOpenDealId, onCommandOpenHandled]);
+
+  useEffect(() => {
+    if (!commandCreateDealTick) return;
+    openNew();
+    if (onCommandOpenHandled) onCommandOpenHandled();
+  }, [commandCreateDealTick, onCommandOpenHandled]);
+
+  useEffect(() => {
+    saveLS(LS_BACHECA_UI, { view, q, soloMiei, sort });
+  }, [view, q, soloMiei, sort]);
 
   return (
     <>
@@ -1375,6 +1477,7 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
                     <th className="px-4 py-2.5">Inseritore</th>
                     <SortableTh label="MQ" sortKey="mq" sort={sort} onSort={toggleSort} align="right" />
                     <SortableTh label="ROI ONBILD" sortKey="roi" sort={sort} onSort={toggleSort} align="right" />
+                    <SortableTh label="Priorita" sortKey="priority" sort={sort} onSort={toggleSort} align="right" />
                     <th className="px-4 py-2.5 text-right">Richiesto</th>
                     <th className="px-4 py-2.5 text-right">On market</th>
                     <th className="px-4 py-2.5">Stato</th>
@@ -1392,7 +1495,8 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
                       <td className="px-4 py-3 text-neutral-600">{d.citta}{d.zona ? ` · ${d.zona}` : ""}</td>
                       <td className="px-4 py-3"><span className="flex items-center gap-1.5 text-xs text-neutral-500"><Avatar nome={`${d.nomeInseritore} ${d.cognomeInseritore}`} />{d.nomeInseritore} {d.cognomeInseritore}</span></td>
                       <td className="px-4 py-3 text-right tabular-nums text-neutral-700">{(d.mq || 0).toLocaleString("it-IT")}</td>
-                      <td className="px-4 py-3 text-right">{toNum(d.roiOnbild) > 0 ? <RoiTag roi={toNum(d.roiOnbild)} /> : <span className="text-neutral-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right">{toNum(d.roiOnbild) > 0 ? <div className="flex flex-col items-end gap-1"><RoiTag roi={toNum(d.roiOnbild)} /><RoiDeltaBadge deal={d} /></div> : <span className="text-neutral-300">—</span>}</td>
+                      <td className="px-4 py-3 text-right"><PriorityScoreBadge deal={d} /></td>
                       <td className="px-4 py-3 text-right tabular-nums text-neutral-700">{d.prezzoTotaleAnnuncio > 0 ? eurK(d.prezzoTotaleAnnuncio) : "—"}</td>
                       <td className="px-4 py-3 text-right"><MesiFlag mesi={mesiTrascorsi(d.dataInizioCommercializzazione)} /></td>
                       <td className="px-4 py-3"><StatoChip stato={d.stato} /></td>
@@ -1442,7 +1546,7 @@ function BachecaDeals({ deals, dispatch, zones, commandOpenDealId, onCommandOpen
   );
 }
 
-function CommandPalette({ open, onClose, deals, onSelect }) {
+function CommandPalette({ open, onClose, deals, onSelect, onAction }) {
   const [q, setQ] = useState("");
   const inputRef = useRef(null);
 
@@ -1472,12 +1576,19 @@ function CommandPalette({ open, onClose, deals, onSelect }) {
             placeholder="Cerca per ID, via o citta..."
             className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm focus:border-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900"
           />
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button onClick={() => onAction("new_deal")} className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50">Nuova pratica</button>
+            <button onClick={() => onAction("open_top_priority")} className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50">Apri top priorita</button>
+            <button onClick={() => onAction("goto_bacheca")} className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50">Bacheca</button>
+            <button onClick={() => onAction("goto_agenda")} className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50">Agenda</button>
+            <button onClick={() => onAction("goto_discovery")} className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 hover:bg-neutral-50">Discovery</button>
+          </div>
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {results.length === 0 && <div className="px-3 py-6 text-center text-sm text-neutral-400">Nessun risultato.</div>}
           {results.map((d) => (
             <button key={d.id} onClick={() => onSelect(d.id)} className="w-full rounded-md px-3 py-2 text-left hover:bg-neutral-50">
-              <div className="text-xs text-neutral-400">{d.id} · {d.stato}</div>
+              <div className="text-xs text-neutral-400">{d.id} · {d.stato} · P{getDealPriority(d).score}</div>
               <div className="text-sm font-semibold text-neutral-900">{d.progetto}</div>
               <div className="text-xs text-neutral-500">{d.indirizzo || "—"} · {d.citta}</div>
             </button>
@@ -1665,6 +1776,7 @@ export default function ElektaBachecaOS() {
   const [tab, setTab]             = useState("bacheca");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [commandOpenDealId, setCommandOpenDealId] = useState(null);
+  const [commandCreateDealTick, setCommandCreateDealTick] = useState(0);
 
   useEffect(() => { saveLS(LS_DEALS, dealState); }, [dealState]);
   useEffect(() => { saveLS(LS_DISC,  discState);  }, [discState]);
@@ -1707,7 +1819,7 @@ export default function ElektaBachecaOS() {
         </div>
       </header>
       <main className="mx-auto max-w-7xl px-6 py-6">
-        {tab === "bacheca"   && <BachecaDeals deals={dealState.deals} dispatch={dealDispatch} zones={discState.zones} commandOpenDealId={commandOpenDealId} onCommandOpenHandled={() => setCommandOpenDealId(null)} />}
+        {tab === "bacheca"   && <BachecaDeals deals={dealState.deals} dispatch={dealDispatch} zones={discState.zones} commandOpenDealId={commandOpenDealId} commandCreateDealTick={commandCreateDealTick} onCommandOpenHandled={() => setCommandOpenDealId(null)} />}
         {tab === "discovery" && <DiscoveryMercato zones={discState.zones} dispatch={discDispatch} />}
         {tab === "agenda"    && <AgendaCommerciale deals={dealState.deals} />}
       </main>
@@ -1715,6 +1827,25 @@ export default function ElektaBachecaOS() {
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         deals={dealState.deals}
+        onAction={(action) => {
+          setPaletteOpen(false);
+          if (action === "goto_bacheca") setTab("bacheca");
+          if (action === "goto_agenda") setTab("agenda");
+          if (action === "goto_discovery") setTab("discovery");
+          if (action === "new_deal") {
+            setTab("bacheca");
+            setCommandCreateDealTick((n) => n + 1);
+          }
+          if (action === "open_top_priority") {
+            const top = dealState.deals
+              .filter((d) => d.stato !== "Abort")
+              .sort((a, b) => getDealPriority(b).score - getDealPriority(a).score)[0];
+            if (top) {
+              setTab("bacheca");
+              setCommandOpenDealId(top.id);
+            }
+          }
+        }}
         onSelect={(id) => {
           setPaletteOpen(false);
           setTab("bacheca");
