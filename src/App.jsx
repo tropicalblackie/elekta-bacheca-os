@@ -607,9 +607,8 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
             </div>
           </CollapsibleFieldset>
 
-          <CollapsibleFieldset legend="La trinità dei link · obbligatori" highlight>
+          <CollapsibleFieldset legend="links*" highlight>
             <div className="space-y-4">
-              <div className="mb-3 rounded-md bg-neutral-900 px-3 py-2 text-xs text-neutral-300">⭐ Link essenziali per il passaggio di consegne Analista → Commerciale.</div>
               <UrlField label="Link annuncio" hint="Immobiliare.it / Idealista" placeholder="https://www.immobiliare.it/…" value={f.linkAnnuncio} onChange={set("linkAnnuncio")} error={showErr("linkAnnuncio")} ref={(el) => { if (el) errorRefs.current.linkAnnuncio = el; }} />
               <UrlField label="Link ONBILD" hint="valutazione originaria" placeholder="https://onbild.com/…" value={f.linkOnbild} onChange={set("linkOnbild")} error={showErr("linkOnbild")} ref={(el) => { if (el) errorRefs.current.linkOnbild = el; }} />
               <UrlField label="Cartella documentazione" hint="Drive / Dropbox" placeholder="https://drive.google.com/…" value={f.linkDrive} onChange={set("linkDrive")} error={showErr("linkDrive")} ref={(el) => { if (el) errorRefs.current.linkDrive = el; }} />
