@@ -571,8 +571,8 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
           <CollapsibleFieldset legend="Anagrafica inseritore">
             <div className="grid grid-cols-5 gap-3">
-              <div className="col-span-2"><TextField label="Nome" placeholder="Mario" value={f.nomeInseritore} onChange={set("nomeInseritore")} error={showErr("nomeInseritore")} ref={(el) => { if (el) errorRefs.current.nomeInseritore = el; }} /></div>
-              <div className="col-span-2"><TextField label="Cognome" placeholder="Rossi" value={f.cognomeInseritore} onChange={set("cognomeInseritore")} error={showErr("cognomeInseritore")} ref={(el) => { if (el) errorRefs.current.cognomeInseritore = el; }} /></div>
+              <div className="col-span-2"><TextField label="Nome" placeholder="Alan" value={f.nomeInseritore} onChange={set("nomeInseritore")} error={showErr("nomeInseritore")} ref={(el) => { if (el) errorRefs.current.nomeInseritore = el; }} /></div>
+              <div className="col-span-2"><TextField label="Cognome" placeholder="Zoccolan" value={f.cognomeInseritore} onChange={set("cognomeInseritore")} error={showErr("cognomeInseritore")} ref={(el) => { if (el) errorRefs.current.cognomeInseritore = el; }} /></div>
               <SelectField label="Ruolo" options={RUOLI_INS} value={f.ruoloInseritore} onChange={set("ruoloInseritore")} />
             </div>
           </CollapsibleFieldset>
@@ -614,7 +614,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
               <UrlField label="Cartella documentazione" hint="Drive / Dropbox" placeholder="https://drive.google.com/…" value={f.linkDrive} onChange={set("linkDrive")} error={showErr("linkDrive")} ref={(el) => { if (el) errorRefs.current.linkDrive = el; }} />
               <div className="border-t border-neutral-100 pt-4">
                 <Label>Contatto immobiliare</Label>
-                <input type="text" inputMode="tel" value={f.contattoImmobiliare} onChange={(e) => setF((s) => ({ ...s, contattoImmobiliare: formatPhone(e.target.value) }))} placeholder="Alan Zoccolan" className={inputCls(false)} />
+                <input type="text" inputMode="tel" value={f.contattoImmobiliare} onChange={(e) => setF((s) => ({ ...s, contattoImmobiliare: formatPhone(e.target.value) }))} placeholder="Es. Mario Rossi · 333 123 4567" className={inputCls(false)} />
               </div>
             </div>
           </CollapsibleFieldset>
