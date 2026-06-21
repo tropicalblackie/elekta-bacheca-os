@@ -196,8 +196,8 @@ const STATO_STYLE = {
 };
 const SUBSTATI = {
   "Stand-by": ["Da valutare", "In attesa info", "Prezzo da rinegoziare"],
-  Attivata:   ["Sopralluogo da fissare", "In attesa documenti", "Proposta inviata", "Due Diligence"],
-  Abort:      ["Prezzo fuori mercato", "Asta persa", "Problemi urbanistici", "Ritirato dal venditore"],
+  Attivata:   ["Inoltrato ai Commerciali", "Sopralluogo da fissare", "In attesa documenti", "Proposta inviata", "Due Diligence"],
+  Abort:      ["ROI Reale < 20%", "Prezzo fuori mercato", "Asta persa", "Problemi urbanistici", "Ritirato dal venditore"],
 };
 const TIPOLOGIE  = ["Terreno Edificabile", "Frazionamento", "Riqualificazione", "Cambio d'uso", "NPL / Asta"];
 const VENDITORI  = ["Privato", "Impresa"];
@@ -331,10 +331,22 @@ function dealReducer(state, action) {
   switch (action.type) {
     case "ADD": {
       const id = `NDG-${String(state.seq).padStart(3, "0")}`;
-      return { deals: [{ ...action.payload, id, dataCaricamento: oggi(), ultimaModifica: oggiISO(), noteLog: [] }, ...state.deals], seq: state.seq + 1 };
+      const base = { ...action.payload, id, dataCaricamento: oggi(), ultimaModifica: oggiISO(), noteLog: [] };
+      const { next, autoNote } = applyRoiRouting(null, base);
+      const withLog = autoNote ? { ...next, noteLog: [{ testo: autoNote, data: oggi(), iso: oggiISO() }] } : next;
+      return { deals: [withLog, ...state.deals], seq: state.seq + 1 };
     }
     case "UPDATE":
-      return { ...state, deals: state.deals.map((d) => d.id === action.payload.id ? { ...d, ...action.payload, ultimaModifica: oggiISO() } : d) };
+      return {
+        ...state,
+        deals: state.deals.map((d) => {
+          if (d.id !== action.payload.id) return d;
+          const merged = { ...d, ...action.payload, ultimaModifica: oggiISO() };
+          const { next, autoNote } = applyRoiRouting(d, merged);
+          if (!autoNote) return next;
+          return { ...next, noteLog: [{ testo: autoNote, data: oggi(), iso: oggiISO() }, ...(next.noteLog || [])] };
+        }),
+      };
     case "DELETE":
       return { ...state, deals: state.deals.filter((d) => d.id !== action.id) };
     case "MOVE":
@@ -354,7 +366,7 @@ const DEAL_EMPTY = {
   linkAnnuncio: "", linkOnbild: "", linkDrive: "", contattoImmobiliare: "",
   stato: "Stand-by", subStato: SUBSTATI["Stand-by"][0], priorita: PRIORITA[1], owner: "",
   dataInizioCommercializzazione: "",
-  roiOnbild: "", roiPostDiscovery: "",
+  roiOnbild: "", roiPostDiscovery: "", roiRealeAggiornato: "",
   cifraProposta: "", dataProposta: "",
   prezzoTotaleAnnuncio: "",
   baseAsta: "", offertaMinimaAsta: "", dataEsperimento: "",
@@ -363,12 +375,39 @@ const DEAL_EMPTY = {
   vincoli: "", ipoteche: "", noteCondoni: "",
   noteLog: [],
 };
-const DEAL_NUM = ["mq", "roiOnbild", "roiPostDiscovery", "cifraProposta", "prezzoTotaleAnnuncio", "prezzoMqDiscovery", "baseAsta", "offertaMinimaAsta"];
+const DEAL_NUM = ["mq", "roiOnbild", "roiPostDiscovery", "roiRealeAggiornato", "cifraProposta", "prezzoTotaleAnnuncio", "prezzoMqDiscovery", "baseAsta", "offertaMinimaAsta"];
 
 /* ============================================================ */
 /*  STORE — DISCOVERY                                           */
 /* ============================================================ */
 const DISC_INIT = { zones: [], seq: 1 };
+
+function normalizeRoiReale(dealLike) {
+  const raw = String(dealLike?.roiRealeAggiornato ?? "").trim();
+  if (raw) return toNum(raw);
+  return toNum(dealLike?.roiPostDiscovery);
+}
+
+function applyRoiRouting(prevDeal, nextDeal) {
+  const hasRoiInput = String(nextDeal?.roiRealeAggiornato ?? "").trim() || String(nextDeal?.roiPostDiscovery ?? "").trim();
+  if (!hasRoiInput) return { next: nextDeal, autoNote: null };
+
+  const roi = normalizeRoiReale(nextDeal);
+  if (!Number.isFinite(roi) || roi === 0) return { next: nextDeal, autoNote: null };
+
+  const routed = roi < 20
+    ? { ...nextDeal, stato: "Abort", subStato: "ROI Reale < 20%", autoStatusByRoi: true }
+    : { ...nextDeal, stato: "Attivata", subStato: "Inoltrato ai Commerciali", autoStatusByRoi: true };
+
+  const prevNorm = normalizeRoiReale(prevDeal);
+  const changed = prevDeal ? prevNorm !== roi : true;
+  const autoNote = changed
+    ? `[ROI] Reale aggiornato da ${prevNorm ? `${prevNorm.toFixed(1)}%` : "—"} a ${roi.toFixed(1)}% · Stato auto: ${routed.stato}`
+    : null;
+
+  return { next: routed, autoNote };
+}
+
 function discReducer(state, action) {
   switch (action.type) {
     case "ADD_ZONE": { const id = `DZ-${String(state.seq).padStart(3, "0")}`; return { zones: [{ ...action.payload, id, cantieri: [] }, ...state.zones], seq: state.seq + 1 }; }
@@ -376,10 +415,25 @@ function discReducer(state, action) {
     case "DELETE_ZONE": return { ...state, zones: state.zones.filter((z) => z.id !== action.id) };
     case "ADD_CANTIERE": return { ...state, zones: state.zones.map((z) => z.id === action.zoneId ? { ...z, cantieri: [...z.cantieri, action.payload] } : z) };
     case "DELETE_CANTIERE": return { ...state, zones: state.zones.map((z) => z.id === action.zoneId ? { ...z, cantieri: z.cantieri.filter((_, i) => i !== action.idx) } : z) };
+    case "UPSERT_LINKED_ZONE": {
+      const existing = state.zones.find((z) => z.dealId === action.payload.dealId);
+      if (existing) return state;
+      const id = `DZ-${String(state.seq).padStart(3, "0")}`;
+      return {
+        zones: [{
+          ...DISC_EMPTY,
+          ...action.payload,
+          id,
+          cantieri: [],
+          autoLinked: true,
+        }, ...state.zones],
+        seq: state.seq + 1,
+      };
+    }
     default: return state;
   }
 }
-const DISC_EMPTY = { citta: "", macrozona: "", tipologia: TIPO_DISC[0], rating: RATINGS_ZONA[0], tts: "", prezzoObiettivo: "" };
+const DISC_EMPTY = { dealId: "", autoLinked: false, citta: "", macrozona: "", tipologia: TIPO_DISC[0], rating: RATINGS_ZONA[0], tts: "", prezzoObiettivo: "" };
 const CANT_EMPTY = { nome: "", indirizzo: "", locali: "", mq: "", asking: "", closing: "" };
 
 /* ============================================================ */
@@ -749,7 +803,7 @@ function DealSlideOver({ open, onClose, onSave, editing, seed, zones, existingDe
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <NumField label="ROI ONBILD" suffix="%" placeholder="0" value={f.roiOnbild} onChange={set("roiOnbild")} />
-                <NumField label="ROI post-discovery" suffix="%" placeholder="—" value={f.roiPostDiscovery} onChange={set("roiPostDiscovery")} />
+                <NumField label="ROI Reale Aggiornato (%)" suffix="%" placeholder="—" value={f.roiRealeAggiornato} onChange={set("roiRealeAggiornato")} />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 {!isNpl ? (
@@ -813,7 +867,7 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
 
   useEffect(() => {
     if (open && deal) {
-      setF({ stato: deal.stato || "Stand-by", subStato: deal.subStato || "", priorita: deal.priorita || "Media", owner: deal.owner || "", dataProposta: deal.dataProposta || "", cifraProposta: deal.cifraProposta ? String(deal.cifraProposta) : "" });
+      setF({ stato: deal.stato || "Stand-by", subStato: deal.subStato || "", priorita: deal.priorita || "Media", owner: deal.owner || "", dataProposta: deal.dataProposta || "", cifraProposta: deal.cifraProposta ? String(deal.cifraProposta) : "", roiRealeAggiornato: deal.roiRealeAggiornato ? String(deal.roiRealeAggiornato) : "" });
       setNuovaNota("");
     }
   }, [open, deal]);
@@ -821,7 +875,7 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
   if (!deal) return null;
   const set      = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const setStato = (e) => { const stato = e.target.value; setF((s) => ({ ...s, stato, subStato: (SUBSTATI[stato] || [])[0] || "" })); };
-  const submit   = () => { onSave({ ...deal, ...f, cifraProposta: toNum(f.cifraProposta) }); };
+  const submit   = () => { onSave({ ...deal, ...f, cifraProposta: toNum(f.cifraProposta), roiRealeAggiornato: String(f.roiRealeAggiornato || "") }); };
 
   const aggiungiNota = () => {
     if (!nuovaNota.trim()) return;
@@ -872,6 +926,9 @@ function GestioneAgenteSlideOver({ open, onClose, deal, onSave, onAddNote }) {
             <div className="grid grid-cols-2 gap-3">
               <NumField label="Cifra proposta" suffix="€" placeholder="0" value={f.cifraProposta} onChange={set("cifraProposta")} />
               <DateField label="Data proposta" value={f.dataProposta} onChange={set("dataProposta")} />
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              <NumField label="ROI Reale Aggiornato (%)" suffix="%" placeholder="—" value={f.roiRealeAggiornato} onChange={set("roiRealeAggiornato")} />
             </div>
             {getOfferForDeal(deal, f.cifraProposta) > 0 && (deal.prezzoTotaleAnnuncio > 0 || deal.prezzoMqDiscovery > 0) && (
               <div className="flex flex-wrap items-center gap-2 rounded-md border border-neutral-100 bg-neutral-50 px-3 py-2">
@@ -961,16 +1018,16 @@ function WidgetPrezzoMq({ deal }) {
   );
 }
 function WidgetRoi({ deal }) {
-  const onb  = toNum(deal.roiOnbild), post = toNum(deal.roiPostDiscovery);
+  const onb  = toNum(deal.roiOnbild), post = normalizeRoiReale(deal);
   if (!onb) return null;
-  const hasPost   = post !== 0 || deal.roiPostDiscovery;
+  const hasPost   = post !== 0 || String(deal.roiRealeAggiornato || "").trim() || String(deal.roiPostDiscovery || "").trim();
   const contrazione = hasPost && post < onb;
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-4">
       <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Ricalibrazione ROI</div>
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-center"><div className="text-[10px] uppercase tracking-wide text-neutral-400">ROI ONBILD</div><div className="mt-1"><RoiTag roi={onb} size="lg" /></div></div>
-        <div className={`rounded-md border px-3 py-2 text-center ${contrazione ? "border-red-200 bg-red-50" : "border-neutral-200 bg-neutral-50"}`}><div className="text-[10px] uppercase tracking-wide text-neutral-400">ROI Post-Discovery</div><div className="mt-1">{hasPost ? <RoiTag roi={post} size="lg" /> : <span className="text-lg text-neutral-300">—</span>}</div></div>
+        <div className={`rounded-md border px-3 py-2 text-center ${contrazione ? "border-red-200 bg-red-50" : "border-neutral-200 bg-neutral-50"}`}><div className="text-[10px] uppercase tracking-wide text-neutral-400">ROI Reale Aggiornato</div><div className="mt-1">{hasPost ? <RoiTag roi={post} size="lg" /> : <span className="text-lg text-neutral-300">—</span>}</div></div>
       </div>
       {contrazione && <div className="mt-3 flex items-center gap-1.5 rounded-md bg-red-50 px-3 py-2 text-xs font-medium text-red-700"><AlertTriangle className="h-3.5 w-3.5" />Margine in contrazione ({pct(post - onb)} vs stima ONBILD)</div>}
       {hasPost && <div className="mt-3"><RoiDeltaBadge deal={deal} /></div>}
@@ -990,7 +1047,7 @@ function buildPitch(deal) {
     toNum(deal.prezzoMqDiscovery) > 0 ? `🔍 Prezzo MQ Discovery: ${eurMq(deal.prezzoMqDiscovery)}` : null,
     ``,
     toNum(deal.roiOnbild) > 0        ? `📈 ROI ONBILD: +${toNum(deal.roiOnbild).toFixed(1)}%` : null,
-    toNum(deal.roiPostDiscovery) > 0  ? `📉 ROI Post-Discovery: +${toNum(deal.roiPostDiscovery).toFixed(1)}%` : null,
+    normalizeRoiReale(deal) > 0  ? `📉 ROI Reale Aggiornato: +${normalizeRoiReale(deal).toFixed(1)}%` : null,
     deal.vincoli  ? `⚠️ Vincoli: ${deal.vincoli}` : null,
     deal.ipoteche ? `🔒 Ipoteche: ${deal.ipoteche}` : null,
     ``,
@@ -1780,6 +1837,25 @@ export default function ElektaBachecaOS() {
 
   useEffect(() => { saveLS(LS_DEALS, dealState); }, [dealState]);
   useEffect(() => { saveLS(LS_DISC,  discState);  }, [discState]);
+
+  useEffect(() => {
+    const linkedIds = new Set(discState.zones.map((z) => z.dealId).filter(Boolean));
+    dealState.deals.forEach((d) => {
+      if (!d.id || linkedIds.has(d.id)) return;
+      discDispatch({
+        type: "UPSERT_LINKED_ZONE",
+        payload: {
+          dealId: d.id,
+          citta: d.citta || "",
+          macrozona: d.zona || d.indirizzo || d.progetto || "",
+          tipologia: TIPO_DISC[0],
+          rating: RATINGS_ZONA[1] || RATINGS_ZONA[0],
+          tts: "",
+          prezzoObiettivo: toNum(d.prezzoMqDiscovery) || 0,
+        },
+      });
+    });
+  }, [dealState.deals, discState.zones]);
 
   const pipelineCount = dealState.deals.filter((d) => d.stato !== "Abort").length;
   const followupCount = dealState.deals.filter((d) => {
